@@ -50,7 +50,7 @@ wait_for_services() {
 restore_fixture() {
   local fixture="$1"
   echo "Restoring $(basename "$fixture") into the temporary MySQL worker..."
-  compose exec -T mysql mysql -uroot -ppocroot < "$fixture"
+  compose exec -T mysql mysql -ufixme -pfixme < "$fixture"
 }
 
 current_projection() {
