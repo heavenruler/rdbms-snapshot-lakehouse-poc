@@ -1,0 +1,74 @@
+name: rdbms-snapshot-lakehouse-poc
+
+services:
+  floci:
+    image: floci/floci:latest
+    ports:
+      - "4566:4566"
+    environment:
+      FLOCI_STORAGE_MODE: persistent
+      FLOCI_STORAGE_PATH: /data/floci
+    volumes:
+      - floci-data:/data/floci
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -q -O- http://localhost:4566/_localstack/health >/dev/null 2>&1 || wget -q -O- http://localhost:4566/ >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  catalog-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: iceberg
+      POSTGRES_USER: iceberg
+      POSTGRES_PASSWORD: iceberg
+    volumes:
+      - catalog-data:/var/lib/postgresql/data
+      - ./catalog/init.sql:/docker-entrypoint-initdb.d/01-iceberg.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iceberg -d iceberg"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  mysql:
+    image: mysql:8.4
+    command:
+      - --local-infile=1
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: pocroot
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-ppocroot", "--silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  trino:
+    image: trinodb/trino:483
+    depends_on:
+      floci:
+        condition: service_started
+      catalog-db:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./trino/etc:/etc/trino:ro
+      - trino-data:/data/trino
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/v1/info"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+volumes:
+  floci-data:
+  catalog-data:
+  mysql-data:
+  trino-data:
