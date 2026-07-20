@@ -88,22 +88,30 @@ WHERE valid_from < DATE '2016-01-01'
 
 ## 架構
 
-```text
-既有磁帶 weekly backup
-        |
-        | 一次性批次取回
-        v
-S3 temporary raw zone
-        |
-        | 相容版本的 temporary MySQL/MariaDB worker restore
-        v
-依 PK + row_hash 比較相鄰 snapshots
-        |
-        v
-Iceberg table metadata + Parquet data files
-        |
-        v
-S3 長期查詢層 ---- SQL engine (Athena / Trino / Spark)
+```mermaid
+flowchart LR
+    Tape[(既有磁帶<br/>Weekly logical backups)]
+    Raw[(S3 temporary<br/>raw zone)]
+    Worker[Temporary MySQL / MariaDB<br/>相容版本 restore workers]
+    Diff[Snapshot differencing<br/>Primary key + row hash]
+    Catalog[(Iceberg catalog<br/>metadata pointers)]
+    Lake[(S3 lakehouse<br/>Iceberg metadata + Parquet)]
+    SQL[SQL engines<br/>Athena / Trino / Spark]
+    Users[資料調閱使用者]
+    Retention[權威原始備份<br/>長期保存]
+    Cleanup[回填驗證完成後<br/>刪除 raw copy]
+
+    Tape -->|一次性批次取回| Raw
+    Raw -->|依 snapshot restore| Worker
+    Worker -->|統一 schema 的 rows| Diff
+    Diff -->|只寫入不同版本| Lake
+    Diff -->|commit table state| Catalog
+    Catalog -->|解析 current metadata| SQL
+    Lake -->|讀取必要欄位與檔案| SQL
+    SQL -->|SELECT table / table_history| Users
+
+    Retention -.-> Tape
+    Cleanup -.-> Raw
 ```
 
 正式環境的資料載體分工：
@@ -115,20 +123,37 @@ S3 長期查詢層 ---- SQL engine (Athena / Trino / Spark)
 
 本機 PoC 架構：
 
-```text
-four mysqldump fixtures
-        |
-        v
-temporary MySQL worker ---- Trino MySQL connector
-                                  |
-                                  v
-PostgreSQL JDBC catalog <---- Trino Iceberg connector
-                                  |
-                                  v
-                         Iceberg + Parquet
-                                  |
-                                  v
-                              Floci S3
+```mermaid
+flowchart LR
+    Fixtures[四週 mysqldump fixtures]
+
+    subgraph Restore[Restore layer]
+        MySQL[(MySQL 8.4<br/>temporary worker)]
+    end
+
+    subgraph Query[SQL and table layer]
+        Trino[Trino 483]
+        MySQLConnector[MySQL connector]
+        IcebergConnector[Iceberg connector]
+        Trino --- MySQLConnector
+        Trino --- IcebergConnector
+    end
+
+    subgraph Metadata[Catalog layer]
+        PostgreSQL[(PostgreSQL 17<br/>JDBC catalog V0)]
+    end
+
+    subgraph Storage[Object storage layer]
+        Floci[(Floci S3)]
+        IcebergFiles[Iceberg metadata<br/>Parquet data files]
+        Floci --- IcebergFiles
+    end
+
+    Fixtures -->|mysql restore| MySQL
+    MySQL -->|讀取 snapshot rows| MySQLConnector
+    IcebergConnector -->|catalog records| PostgreSQL
+    IcebergConnector -->|atomic metadata / data writes| Floci
+    Trino -->|MERGE / INSERT / SELECT| IcebergConnector
 ```
 
 元件版本固定於 [`compose.yaml`](compose.yaml)：
