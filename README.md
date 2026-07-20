@@ -223,7 +223,8 @@ docker info
 ## 如何執行
 
 ```bash
-cd /Users/wn.lin/vscode-git/rdbms-snapshot-lakehouse-poc
+mkdir -p ~/rdbms-snapshot-lakehouse-poc
+cd ~/rdbms-snapshot-lakehouse-poc
 ./scripts/run-poc.sh
 ```
 
